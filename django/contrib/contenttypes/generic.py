@@ -232,9 +232,10 @@ class GenericRelation(RelatedField, Field):
         Return all objects related to ``objs`` via this ``GenericRelation``.
 
         """
+        manager = self.rel.to._base_manager.db_manager(using)
         if not objs:
-            return []
-        return self.rel.to._base_manager.db_manager(using).filter(**{
+            return manager.none()
+        return manager.filter(**{
                 "%s__pk" % self.content_type_field_name:
                     ContentType.objects.db_manager(using).get_for_model(objs[0].__class__).pk,
                 "%s__in" % self.object_id_field_name:
