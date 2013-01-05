@@ -6,7 +6,7 @@ from django.db.backends.util import truncate_name
 from django.db.models.constants import LOOKUP_SEP
 from django.db.models.query_utils import select_related_descend
 from django.db.models.sql.constants import (SINGLE, MULTI, ORDER_DIR,
-        GET_ITERATOR_CHUNK_SIZE, REUSE_ALL, SelectInfo)
+        GET_ITERATOR_CHUNK_SIZE, SelectInfo)
 from django.db.models.sql.datastructures import EmptyResultSet
 from django.db.models.sql.expressions import SQLEvaluator
 from django.db.models.sql.query import get_order_dir, Query
@@ -255,32 +255,18 @@ class SQLCompiler(object):
         result = []
         if opts is None:
             opts = self.query.model._meta
-        # Skip all proxy to the root proxied model
-        opts = opts.concrete_model._meta
         qn = self.quote_name_unless_alias
         qn2 = self.connection.ops.quote_name
         aliases = set()
         only_load = self.deferred_to_columns()
-
+        seen = self.query.included_inherited_models.copy()
         if start_alias:
-            seen = {None: start_alias}
+            seen[None] = start_alias
         for field, model in opts.get_fields_with_model():
             if from_parent and model is not None and issubclass(from_parent, model):
                 # Avoid loading data for already loaded parents.
                 continue
-            if start_alias:
-                try:
-                    alias = seen[model]
-                except KeyError:
-                    link_field = opts.get_ancestor_link(model)
-                    alias = self.query.join((start_alias, model._meta.db_table,
-                            link_field.column, model._meta.pk.column))
-                    seen[model] = alias
-            else:
-                # If we're starting from the base model of the queryset, the
-                # aliases will have already been set up in pre_sql_setup(), so
-                # we can save time here.
-                alias = self.query.included_inherited_models[model]
+            alias = self.query.join_parent_model(opts, model, start_alias, seen)
             table = self.query.alias_map[alias].table_name
             if table in only_load and field.column not in only_load[table]:
                 continue
@@ -448,8 +434,8 @@ class SQLCompiler(object):
         """
         if not alias:
             alias = self.query.get_initial_alias()
-        field, target, opts, joins, _, _ = self.query.setup_joins(pieces,
-                opts, alias, REUSE_ALL)
+        field, target, opts, joins, _ = self.query.setup_joins(
+            pieces, opts, alias)
         # We will later on need to promote those joins that were added to the
         # query afresh above.
         joins_to_promote = [j for j in joins if self.query.alias_refcount[j] < 2]
@@ -501,20 +487,27 @@ class SQLCompiler(object):
         qn = self.quote_name_unless_alias
         qn2 = self.connection.ops.quote_name
         first = True
+        from_params = []
         for alias in self.query.tables:
             if not self.query.alias_refcount[alias]:
                 continue
             try:
-                name, alias, join_type, lhs, lhs_col, col, nullable = self.query.alias_map[alias]
+                name, alias, join_type, lhs, lhs_col, col, _, join_field = self.query.alias_map[alias]
             except KeyError:
                 # Extra tables can end up in self.tables, but not in the
                 # alias_map if they aren't in a join. That's OK. We skip them.
                 continue
             alias_str = (alias != name and ' %s' % alias or '')
             if join_type and not first:
-                result.append('%s %s%s ON (%s.%s = %s.%s)'
-                        % (join_type, qn(name), alias_str, qn(lhs),
-                           qn2(lhs_col), qn(alias), qn2(col)))
+                if join_field and hasattr(join_field, 'get_extra_join_sql'):
+                    extra_cond, extra_params = join_field.get_extra_join_sql(
+                        self.connection, qn, lhs, alias)
+                    from_params.extend(extra_params)
+                else:
+                    extra_cond = ""
+                result.append('%s %s%s ON (%s.%s = %s.%s%s)' %
+                              (join_type, qn(name), alias_str, qn(lhs),
+                               qn2(lhs_col), qn(alias), qn2(col), extra_cond))
             else:
                 connector = not first and ', ' or ''
                 result.append('%s%s%s' % (connector, qn(name), alias_str))
@@ -528,7 +521,7 @@ class SQLCompiler(object):
                 connector = not first and ', ' or ''
                 result.append('%s%s' % (connector, qn(alias)))
                 first = False
-        return result, []
+        return result, from_params
 
     def get_grouping(self, ordering_group_by):
         """
@@ -615,30 +608,11 @@ class SQLCompiler(object):
                 continue
             table = f.rel.to._meta.db_table
             promote = nullable or f.null
-            if model:
-                int_opts = opts
-                alias = root_alias
-                alias_chain = []
-                for int_model in opts.get_base_chain(model):
-                    # Proxy model have elements in base chain
-                    # with no parents, assign the new options
-                    # object and skip to the next base in that
-                    # case
-                    if not int_opts.parents[int_model]:
-                        int_opts = int_model._meta
-                        continue
-                    lhs_col = int_opts.parents[int_model].column
-                    int_opts = int_model._meta
-                    alias = self.query.join((alias, int_opts.db_table, lhs_col,
-                            int_opts.pk.column),
-                            promote=promote)
-                    alias_chain.append(alias)
-            else:
-                alias = root_alias
+            alias = self.query.join_parent_model(opts, model, root_alias, {})
 
             alias = self.query.join((alias, table, f.column,
                     f.rel.get_related_field().column),
-                    promote=promote)
+                    promote=promote, join_field=f)
             columns, aliases = self.get_default_columns(start_alias=alias,
                     opts=f.rel.to._meta, as_pairs=True)
             self.query.related_select_cols.extend(
@@ -662,30 +636,11 @@ class SQLCompiler(object):
                                               only_load.get(model), reverse=True):
                     continue
 
+                alias = self.query.join_parent_model(opts, f.rel.to, root_alias, {})
                 table = model._meta.db_table
-                int_opts = opts
-                alias = root_alias
-                alias_chain = []
-                chain = opts.get_base_chain(f.rel.to)
-                if chain is not None:
-                    for int_model in chain:
-                        # Proxy model have elements in base chain
-                        # with no parents, assign the new options
-                        # object and skip to the next base in that
-                        # case
-                        if not int_opts.parents[int_model]:
-                            int_opts = int_model._meta
-                            continue
-                        lhs_col = int_opts.parents[int_model].column
-                        int_opts = int_model._meta
-                        alias = self.query.join(
-                            (alias, int_opts.db_table, lhs_col, int_opts.pk.column),
-                            promote=True,
-                        )
-                        alias_chain.append(alias)
                 alias = self.query.join(
                     (alias, table, f.rel.get_related_field().column, f.column),
-                    promote=True
+                    promote=True, join_field=f
                 )
                 from_parent = (opts.model if issubclass(model, opts.model)
                                else None)

@@ -73,6 +73,13 @@ class GenericRelationTests(TestCase):
             Q(notes__note__icontains=r'other note'))
         self.assertTrue(org_contact in qs)
 
+    def test_join_reuse(self):
+        qs = Person.objects.filter(
+            addresses__street='foo'
+        ).filter(
+            addresses__street='bar'
+        )
+        self.assertEqual(str(qs.query).count('JOIN'), 2)
     def test_inherited_models_delete(self):
         """
         Test that when deleting a class that inherits a GenericRelation,

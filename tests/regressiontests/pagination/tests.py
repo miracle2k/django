@@ -9,6 +9,7 @@ from django.utils import six
 from django.utils import unittest
 
 from .models import Article
+from .custom import ValidAdjacentNumsPaginator
 
 
 class PaginationTests(unittest.TestCase):
@@ -217,6 +218,20 @@ class PaginationTests(unittest.TestCase):
         self.assertEqual(''.join(page2), 'fghijk')
         self.assertEqual(''.join(reversed(page2)), 'kjihgf')
 
+    def test_get_page_hook(self):
+        """
+        Tests that a Paginator subclass can use the ``_get_page`` hook to
+        return an alternative to the standard Page class.
+        """
+        eleven = 'abcdefghijk'
+        paginator = ValidAdjacentNumsPaginator(eleven, per_page=6)
+        page1 = paginator.page(1)
+        page2 = paginator.page(2)
+        self.assertIsNone(page1.previous_page_number())
+        self.assertEqual(page1.next_page_number(), 2)
+        self.assertEqual(page2.previous_page_number(), 1)
+        self.assertIsNone(page2.next_page_number())
+
 
 class ModelPaginationTests(TestCase):
     """
@@ -238,7 +253,8 @@ class ModelPaginationTests(TestCase):
                 "<Article: Article 3>",
                 "<Article: Article 4>",
                 "<Article: Article 5>"
-            ]
+            ],
+            ordered=False
         )
         self.assertTrue(p.has_next())
         self.assertFalse(p.has_previous())
@@ -257,7 +273,8 @@ class ModelPaginationTests(TestCase):
                 "<Article: Article 7>",
                 "<Article: Article 8>",
                 "<Article: Article 9>"
-            ]
+            ],
+            ordered=False
         )
         self.assertFalse(p.has_next())
         self.assertTrue(p.has_previous())

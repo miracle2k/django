@@ -377,13 +377,9 @@ block are output::
 In the above, if ``athlete_list`` is not empty, the number of athletes will be
 displayed by the ``{{ athlete_list|length }}`` variable.
 
-As you can see, the ``if`` tag may take one or several `` {% elif %}``
+As you can see, the ``if`` tag may take one or several ``{% elif %}``
 clauses, as well as an ``{% else %}`` clause that will be displayed if all
 previous conditions fail. These clauses are optional.
-
-.. versionadded:: 1.4
-
-The ``if`` tag now supports ``{% elif %}`` clauses.
 
 Boolean operators
 ^^^^^^^^^^^^^^^^^
@@ -618,7 +614,7 @@ Output the contents of the block if the two arguments equal each other.
 
 Example::
 
-    {% ifequal user.id comment.user_id %}
+    {% ifequal user.pk comment.user_id %}
         ...
     {% endifequal %}
 
@@ -743,8 +739,6 @@ escaped, because it's not a format character::
 
 This would display as "It is the 4th of September".
 
-.. versionchanged:: 1.4
-
 .. note::
 
     The format passed can also be one of the predefined ones
@@ -864,7 +858,7 @@ an attribute "description," you could use::
     {% regroup cities by country.description as country_list %}
 
 Or, if ``country`` is a field with ``choices``, it will have a
-:meth:`^django.db.models.Model.get_FOO_display` method available as an
+:meth:`~django.db.models.Model.get_FOO_display` method available as an
 attribute, allowing  you to group on the display string rather than the
 ``choices`` key::
 
@@ -1035,6 +1029,16 @@ This will follow the normal :ref:`namespaced URL resolution strategy
 <topics-http-reversing-url-namespaces>`, including using any hints provided
 by the context as to the current application.
 
+.. warning::
+
+    Don't forget to put quotes around the function path or pattern name!
+
+    .. versionchanged:: 1.5
+        The first parameter used not to be quoted, which was inconsistent with
+        other template tags. Since Django 1.5, it is evaluated according to
+        the usual rules: it can be a quoted string or a variable that will be
+        looked up in the context.
+
 .. templatetag:: verbatim
 
 verbatim
@@ -1069,11 +1073,11 @@ value to a maximum value, and then applies that ratio to a constant.
 For example::
 
     <img src="bar.png" alt="Bar"
-         height="10" width="{% widthratio this_value max_value 100 %}" />
+         height="10" width="{% widthratio this_value max_value max_width %}" />
 
-Above, if ``this_value`` is 175 and ``max_value`` is 200, the image in the
-above example will be 88 pixels wide (because 175/200 = .875; .875 * 100 = 87.5
-which is rounded up to 88).
+If ``this_value`` is 175, ``max_value`` is 200, and ``max_width`` is 100, the
+image in the above example will be 88 pixels wide
+(because 175/200 = .875; .875 * 100 = 87.5 which is rounded up to 88).
 
 .. templatetag:: with
 
@@ -1279,10 +1283,6 @@ Z                 Time zone offset in seconds. The          ``-43200`` to ``4320
                   UTC is always positive.
 ================  ========================================  =====================
 
-.. versionadded:: 1.4
-
-The ``e`` and ``o`` format specification characters were added in Django 1.4.
-
 For example::
 
     {{ value|date:"D d M Y" }}
@@ -1455,6 +1455,14 @@ For example::
     {{ value|filesizeformat }}
 
 If ``value`` is 123456789, the output would be ``117.7 MB``.
+
+.. admonition:: File sizes and SI units
+
+    Strictly speaking, ``filesizeformat`` does not conform to the International
+    System of Units which recommends using KiB, MiB, GiB, etc. when byte sizes
+    are calculated in powers of 1024 (which is the case here). Instead, Django
+    uses traditional unit names (KB, MB, GB, etc.) corresponding to names that
+    are more commonly used.
 
 .. templatefilter:: first
 
@@ -1935,9 +1943,9 @@ for documentation of Python string formatting
 
 For example::
 
-    {{ value|stringformat:"s" }}
+    {{ value|stringformat:"E" }}
 
-If ``value`` is ``"Joel is a slug"``, the output will be ``"Joel is a slug"``.
+If ``value`` is ``10``, the output will be ``1.000000E+01``.
 
 .. templatefilter:: striptags
 
@@ -2050,8 +2058,6 @@ If ``value`` is ``"my first post"``, the output will be ``"My First Post"``.
 
 truncatechars
 ^^^^^^^^^^^^^
-
-.. versionadded:: 1.4
 
 Truncates a string if it is longer than the specified number of characters.
 Truncated strings will end with a translatable ellipsis sequence ("...").
@@ -2182,11 +2188,6 @@ It also supports domain-only links ending in one of the original top level
 domains (``.com``, ``.edu``, ``.gov``, ``.int``, ``.mil``, ``.net``, and
 ``.org``). For example, ``djangoproject.com`` gets converted.
 
-.. versionchanged:: 1.4
-
-Until Django 1.4, only the ``.com``, ``.net`` and ``.org`` suffixes were
-supported for domain-only links.
-
 Links can have trailing punctuation (periods, commas, close-parens) and leading
 punctuation (opening parens), and ``urlize`` will still do the right thing.
 
@@ -2316,8 +2317,6 @@ See :ref:`topic-l10n-templates`.
 tz
 ^^
 
-.. versionadded:: 1.4
-
 This library provides control over time zone conversions in templates.
 Like ``l10n``, you only need to load the library using ``{% load tz %}``,
 but you'll usually also set :setting:`USE_TZ` to ``True`` so that conversion
@@ -2338,16 +2337,6 @@ django.contrib.humanize
 A set of Django template filters useful for adding a "human touch" to data. See
 :doc:`/ref/contrib/humanize`.
 
-django.contrib.markup
-^^^^^^^^^^^^^^^^^^^^^
-
-A collection of template filters that implement these common markup languages:
-
-* Textile
-* Markdown
-* reST (reStructuredText)
-
-See the :doc:`markup documentation </ref/contrib/markup>`.
 
 django.contrib.webdesign
 ^^^^^^^^^^^^^^^^^^^^^^^^
